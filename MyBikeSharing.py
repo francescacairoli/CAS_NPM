@@ -5,18 +5,64 @@ import copy
 
 class MyBikeSharing():
 
-    def __init__(self, params):
+    def __init__(self, params, plots_flag = False):
         self.n_stations = params["n_stations"]
         self.n_states = params["n_stations"]**2
         self.n_bikes = params["n_bikes"]
         self.station_capacity = params["station_capacity"]
         self.departure_rates = params["departure_rates"]
         self.distances = params["distances"]
-        self.plots_flag = True
+        self.plots_flag = plots_flag
         self.station_idxs = np.eye(self.n_stations).flatten()
         self.type_reactions = 2
         self.n_transitions = self.type_reactions*self.n_states
         self.colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k']
+
+
+    def label_mf_states(self):
+
+        self.MF_labels = np.zeros((self.n_configs, self.n_stations, 2)) 
+        # 2 labels: one-hot encoding [unsafe, safe]
+        for i in range(self.n_configs):
+            traj_i = np.reshape(self.MF_trajs[i],(self.n_stations,self.n_stations,self.mf_n_time_points))
+            for j in range(self.n_stations):
+                Sj_traj = traj_i[j,j]
+                if np.all((Sj_traj > 0)) and np.all((self.n_bikes*Sj_traj < self.station_capacity)):
+                    self.MF_labels[i,j,1] = 1 # safe
+                else:
+                    self.MF_labels[i,j,0] = 1 # unsafe
+
+
+    def label_ssa_states(self):
+
+        self.SSA_labels = np.zeros((self.n_configs, self.n_stations, 3)) 
+        # 3 labels: one-hot encoding [unsafe, uncertain, safe]
+        for i in range(self.n_configs):
+            pool_trajs_i = self.SSA_trajs[i]
+            lb_i = np.empty((self.n_states,self.ssa_n_time_points))
+            ub_i = np.empty((self.n_states,self.ssa_n_time_points))
+            for tt in range(self.ssa_n_time_points):
+                for jj in range(self.n_states):
+                    lb_i[jj,tt] = np.quantile(pool_trajs_i[:,jj,tt], q=0.025)
+                    ub_i[jj,tt] = np.quantile(pool_trajs_i[:,jj,tt], q=0.925)
+
+            LB_i = np.reshape(lb_i,(self.n_stations,self.n_stations,self.ssa_n_time_points))
+            UB_i = np.reshape(ub_i,(self.n_stations,self.n_stations,self.ssa_n_time_points))
+
+            for j in range(self.n_stations):
+                Sj_lb_traj = LB_i[j,j]
+                Sj_ub_traj = UB_i[j,j]
+                if np.all((Sj_lb_traj > 0)) and np.all((self.n_bikes*Sj_ub_traj < self.station_capacity)):
+                    self.SSA_labels[i,j,2] = 1 # safe
+                elif np.any((Sj_ub_traj == 0)) and np.any((self.n_bikes*Sj_lb_traj == self.station_capacity)):
+                    self.SSA_labels[i,j,0] = 1 # unsafe
+                else:
+                    self.SSA_labels[i,j,1] = 1 # uncertain/risky
+
+
+
+
+
 
     def Ind1(self, z):
         if z > 0:
@@ -59,38 +105,43 @@ class MyBikeSharing():
             X0[i,i] = np.random.randint(0, min(self.station_capacity,nb_available_bikes)+1)
             nb_available_bikes -= X0[i,i]
 
-        already_visited_flag = np.zeros((self.n_stations,self.n_stations))
+        already_visited_flag = np.eye(self.n_stations)
 
         # sample nb of bikes in transit
         while nb_available_bikes > 0:
-            if nb_available_bikes == 1:
-                xx = 1
-            else:
-                xx = np.random.randint(0, nb_available_bikes+1)
+            xx = np.random.randint(0, nb_available_bikes+1)
             tin_idx = np.random.randint(0,self.n_stations)
             tout_idx = np.random.randint(0,self.n_stations)
-            if tin_idx != tout_idx and not already_visited_flag[tin_idx,tout_idx]:
+            if not already_visited_flag[tin_idx,tout_idx]:
                 X0[tin_idx,tout_idx] = xx
                 nb_available_bikes -= xx
                 already_visited_flag[tin_idx,tout_idx] = 1
-
+            if np.sum(already_visited_flag) == self.n_states:
+                X0[tin_idx,tout_idx] = nb_available_bikes
+                nb_available_bikes = 0
+                
         return X0.flatten()
 
     def generate_set_initial_states(self, n_configs):
 
-        return np.array([self.generate_rnd_init_state() for _ in range(n_configs)])
+        self.n_configs = n_configs
+        self.init_configs = np.empty((n_configs, self.n_states))
+        for ii in range(n_configs):
+            print("{}/{}".format(ii+1, n_configs))
+            self.init_configs[ii] = self.generate_rnd_init_state()
 
-    def MF_simulation(self, final_time, n_time_points, init_configs):
+    def MF_simulation(self, final_time, n_time_points):
 
-        n_configs = len(init_configs)
+        self.mf_final_time = final_time
+        self.mf_n_time_points = n_time_points
 
-        timestamp = np.linspace(0,final_time, n_time_points)
-        MF_trajs = np.empty((n_configs,self.n_states, n_time_points))
+        self.mf_timestamp = np.linspace(0,final_time, n_time_points)
+        MF_trajs = np.empty((self.n_configs,self.n_states, n_time_points))
 
-        for j in range(n_configs):
-            print('point = {}/{}'.format(j+1, n_configs))
-            y0 = init_configs[j]/self.n_bikes
-            sol = solve_ivp(self.mean_field_ODE, [0,final_time], y0, t_eval=timestamp, method='DOP853')
+        for j in range(self.n_configs):
+            print('point = {}/{}'.format(j+1, self.n_configs))
+            y0 = self.init_configs[j]/self.n_bikes
+            sol = solve_ivp(self.mean_field_ODE, [0,final_time], y0, t_eval=self.mf_timestamp, method='DOP853')
             MF_trajs[j] = sol.y
             
             if self.plots_flag:
@@ -98,15 +149,15 @@ class MyBikeSharing():
                 c = 0
                 for i in range(self.n_states):
                     if self.station_idxs[i]:
-                        plt.plot(timestamp, MF_trajs[j,i], self.colors[c%len(self.colors)])
+                        plt.plot(self.mf_timestamp, MF_trajs[j,i], self.colors[c%len(self.colors)])
                         c += 1
                     #else:
-                        #plt.plot(timestamp, MF_trajs[j,i],'--', self.colors[i%len(self.colors)])
+                        #plt.plot(self.mf_timestamp, MF_trajs[j,i],'--', self.colors[i%len(self.colors)])
                 plt.title("Mean Field")
                 plt.savefig("myplots/MF_trajs_{}.png".format(j))
                 plt.close()
 
-        return MF_trajs
+        self.MF_trajs = MF_trajs
 
 
     def evaluate_rates(self, state):
@@ -145,21 +196,24 @@ class MyBikeSharing():
 
         return update.flatten()
 
-    def SSA_simulation(self, n_trajs_per_config, final_time, n_time_points, init_configs):
+    def SSA_simulation(self, n_trajs_per_config, final_time, n_time_points):
 
-        n_configs = len(init_configs)
+        self.ssa_final_time = final_time
+        self.ssa_n_time_points = n_time_points
+        
+        self.n_trajs_per_config = n_trajs_per_config
 
-        timestamp = np.linspace(0,final_time, n_time_points)
-        SSA_trajs = np.empty((n_configs,n_trajs_per_config, self.n_states, n_time_points))
+        self.ssa_timestamp = np.linspace(0,final_time, n_time_points)
+        SSA_trajs = np.empty((self.n_configs,n_trajs_per_config, self.n_states, n_time_points))
 
-        for j in range(n_configs):
-            print('point = {}/{}'.format(j+1, n_configs))
+        for j in range(self.n_configs):
+            print('point = {}/{}'.format(j+1, self.n_configs))
 
             for z in range(n_trajs_per_config):
 
                 time = 0
                 print_index = 1
-                state = copy.deepcopy(init_configs[j])
+                state = copy.deepcopy(self.init_configs[j])
 
                 traj = np.zeros((n_time_points, self.n_states))
                 traj[0, :] = state
@@ -184,7 +238,7 @@ class MyBikeSharing():
                         # If not, stop simulation by skipping to final time
                         time = final_time
                     # store values in the output array
-                    while print_index < n_time_points and timestamp[print_index] <= time:
+                    while print_index < n_time_points and self.ssa_timestamp[print_index] <= time:
                         traj[print_index, :] = state
                         print_index += 1          
                 SSA_trajs[j,z] = traj.T
@@ -195,12 +249,12 @@ class MyBikeSharing():
                     c = 0
                     for k in range(self.n_states):
                         if self.station_idxs[k]: # plot bikes in stations
-                            plt.plot(timestamp, SSA_trajs[j,zz,k], self.colors[c%len(self.colors)])
+                            plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k], self.colors[c%len(self.colors)])
                             c += 1
                         #else: # plot transitioning bikes
-                            #plt.plot(timestamp, SSA_trajs[j,zz,k],'--', self.colors[k%len(self.colors)])
+                            #plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k],'--', self.colors[k%len(self.colors)])
                 plt.title("SSA")
                 plt.savefig("myplots/SSA_trajs_{}.png".format(j))
                 plt.close()            
 
-        return SSA_trajs
+        self.SSA_trajs = SSA_trajs

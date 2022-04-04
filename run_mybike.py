@@ -19,7 +19,7 @@ nb_temp_points = 100
 bss = MyBikeSharing(input_dict)
 
 print("Generating initial configurations...")
-init_states = bss.generate_set_initial_states(n_trajs_per_config)
+init_states = bss.generate_set_initial_states(nb_init_config)
 
 print("Generating MF trajectories...")
 MF_trajs = bss.MF_simulation(time_horizon, nb_temp_points, init_states)
