@@ -14,7 +14,7 @@ parser.add_argument("--model_name", type=str, default="MF", help="Name of the mo
 parser.add_argument("--time_horizon", type=int, default=10, help="Time horizon")
 parser.add_argument("--do_refinement", type=bool, default=True, help="Flag: refine of the rejection rule.")
 parser.add_argument("--nb_active_iteratiions", type=int, default=1, help="Number of active learning iterations.")
-parser.add_argument("--nb_epochs", type=int, default=100, help="Number of epochs.")
+parser.add_argument("--nb_epochs", type=int, default=10, help="Number of epochs.")
 parser.add_argument("--nb_epochs_active", type=int, default=400, help="Number of epochs in active learning.")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size.")
 parser.add_argument("--lr", type=float, default=0.00001, help="Adam: learning rate")
@@ -23,21 +23,24 @@ parser.add_argument("--split_rate", type=float, default=50/65, help="adam: learn
 parser.add_argument("--pool_size_ref", type=int, default=25000, help="Size of the pool for the refinement step.")
 parser.add_argument("--pool_size", type=int, default=50000, help="Size of the pool for one active learning step.")
 parser.add_argument("--reinit_weights", type=bool, default=False, help="Flag: do reinitialize the weights in active learning steps.")
-
+parser.add_argument("--po_flag", type=bool, default=False, help="Flag: partial observability.")
 opt = parser.parse_args()
 print(opt)
 
 n_bikes = 100
-capacity = 35
+if opt.arch_name == "triangular":
+	capacity = 35
+else: #rombo
+	capacity = 25
 
 # Load the proper datasets: train, test, validation and calibration
-trainset_fn = "datasets/{}_ds_1000points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
+trainset_fn = "datasets/{}_ds_5000points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
 testset_fn = "datasets/{}_ds_1000points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
 calibrset_fn = "datasets/{}_ds_2500points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
 
-dataset = Dataset(trainset_fn, testset_fn)
+dataset = Dataset(trainset_fn, testset_fn, opt.po_flag)
 dataset.load_data()
-'''
+
 dataset.add_calibration_path(calibrset_fn)
 dataset.load_calibration_data()
 
@@ -63,7 +66,6 @@ print("Test empirical coverage: ", coverage, "Efficiency: ", efficiency)
 
 print("----- Labeling correct/incorrect predictions...")
 cal_errors = utils.label_correct_incorrect_pred(cp.cal_pred_lkh, dataset.L_cal) # shape (n_cal_points,n_outputs)
-print("CALIBRATION ERRORS: ", cal_errors, np.sum(cal_errors[(cal_errors==1)]))
 test_pred_lkh = net_fnc(dataset.X_test_scaled)
 test_errors = utils.label_correct_incorrect_pred(test_pred_lkh, dataset.L_test) # shape (n_test_points,n_outputs)
 
@@ -102,4 +104,3 @@ for j in range(dataset.n_outputs):
 	nb_errors.append(nb_errors_j)
 	detection_rates.append(detection_rate_j)
 	print("----- Error detection rate for station {} = ".format(j), detection_rate_j, "({}/{})".format(nb_detection_j, nb_errors_j))
-'''
