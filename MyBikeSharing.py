@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.integrate import odeint, solve_ivp
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 22})
 import copy
 
 class MyBikeSharing():
@@ -16,7 +17,7 @@ class MyBikeSharing():
         self.station_idxs = np.eye(self.n_stations).flatten()
         self.type_reactions = 2
         self.n_transitions = self.type_reactions*self.n_states
-        self.colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k']
+        self.colors = ['r', 'g', 'b', 'c', 'm', 'y']
 
 
     def label_mf_states(self):
@@ -24,14 +25,14 @@ class MyBikeSharing():
         self.MF_labels = np.zeros((self.n_configs, self.n_stations, 2)) 
         # 2 labels: one-hot encoding [unsafe, safe]
         for i in range(self.n_configs):
-            traj_i = np.reshape(self.MF_trajs[i],(self.n_stations,self.n_stations,self.mf_n_time_points))
+            traj_i = np.reshape(np.round(self.n_bikes*self.MF_trajs[i]),(self.n_stations,self.n_stations,self.mf_n_time_points))
             for j in range(self.n_stations):
                 Sj_traj = traj_i[j,j]
-                if np.all((Sj_traj > 0)) and np.all((self.n_bikes*Sj_traj < self.station_capacity)):
+                if np.all((Sj_traj > 0)) and np.all((Sj_traj < self.station_capacity)):
                     self.MF_labels[i,j,1] = 1 # safe
                 else:
                     self.MF_labels[i,j,0] = 1 # unsafe
-
+            #print(i, self.MF_labels[i])
 
     def label_ssa_states(self):
 
@@ -52,16 +53,35 @@ class MyBikeSharing():
             for j in range(self.n_stations):
                 Sj_lb_traj = LB_i[j,j]
                 Sj_ub_traj = UB_i[j,j]
-                if np.all((Sj_lb_traj > 0)) and np.all((self.n_bikes*Sj_ub_traj < self.station_capacity)):
+                if np.all((Sj_lb_traj > 0)) and np.all((Sj_ub_traj < self.station_capacity)):
                     self.SSA_labels[i,j,2] = 1 # safe
-                elif np.any((Sj_ub_traj == 0)) and np.any((self.n_bikes*Sj_lb_traj == self.station_capacity)):
+                elif np.any((Sj_ub_traj == 0)) and np.any((Sj_lb_traj == self.station_capacity)):
                     self.SSA_labels[i,j,0] = 1 # unsafe
                 else:
                     self.SSA_labels[i,j,1] = 1 # uncertain/risky
 
+            #print("LABELS for point {}:".format(i))
+            #print(self.SSA_labels[i])
 
-
-
+            if self.plots_flag:
+                fig = plt.figure()
+                plt.plot(self.ssa_timestamp, self.station_capacity*np.ones(self.ssa_n_time_points), '-.', c='k', label="capacity")
+                c = 0
+                for k in range(self.n_states):
+                    if self.station_idxs[k]: # plot bikes in stations
+                        #plt.plot(self.ssa_timestamp, lb_i[k], self.colors[c%len(self.colors)], label="S{}".format(c))
+                        #plt.plot(self.ssa_timestamp, ub_i[k], self.colors[c%len(self.colors)])
+                        plt.fill_between(self.ssa_timestamp, lb_i[k], ub_i[k], color=self.colors[c%len(self.colors)], alpha=0.2, label="S{}".format(c))
+                        c += 1
+                        #else: # plot transitioning bikes
+                            #plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k],'--', self.colors[k%len(self.colors)])
+                plt.title("stochastic")
+                plt.legend(fontsize=14)
+                plt.xlabel("time")
+                plt.ylabel("nb. bikes")
+                plt.tight_layout()
+                plt.savefig("myplots/{}_SSA_bounds_{}stations_H={}.png".format(i, self.n_stations, self.ssa_final_time))
+                plt.close() 
 
 
     def Ind1(self, z):
@@ -146,15 +166,20 @@ class MyBikeSharing():
             
             if self.plots_flag:
                 fig = plt.figure()
+                plt.plot(self.mf_timestamp, self.station_capacity*np.ones(self.mf_n_time_points), '-.', c='k',label="capacity")
                 c = 0
                 for i in range(self.n_states):
                     if self.station_idxs[i]:
-                        plt.plot(self.mf_timestamp, MF_trajs[j,i], self.colors[c%len(self.colors)])
+                        plt.plot(self.mf_timestamp, np.round(self.n_bikes*MF_trajs[j,i]), self.colors[c%len(self.colors)], label="S{}".format(c))
                         c += 1
                     #else:
                         #plt.plot(self.mf_timestamp, MF_trajs[j,i],'--', self.colors[i%len(self.colors)])
-                plt.title("Mean Field")
-                plt.savefig("myplots/MF_trajs_{}.png".format(j))
+                plt.title("deterministic")
+                plt.legend(fontsize=14)
+                plt.xlabel("time")
+                plt.ylabel("nb. bikes")
+                plt.tight_layout()
+                plt.savefig("myplots/{}_MF_trajs_{}stations_H={}.png".format(j, self.n_stations, final_time))
                 plt.close()
 
         self.MF_trajs = MF_trajs
@@ -245,16 +270,24 @@ class MyBikeSharing():
 
             if self.plots_flag:
                 fig = plt.figure()
+                plt.plot(self.ssa_timestamp, self.station_capacity*np.ones(self.ssa_n_time_points), '-.', c='k', label="capacity")
                 for zz in range(n_trajs_per_config):
                     c = 0
                     for k in range(self.n_states):
                         if self.station_idxs[k]: # plot bikes in stations
-                            plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k], self.colors[c%len(self.colors)])
+                            if zz == 0:
+                                plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k], self.colors[c%len(self.colors)], label="S{}".format(c))
+                            else:
+                                plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k], self.colors[c%len(self.colors)])
                             c += 1
                         #else: # plot transitioning bikes
                             #plt.plot(self.ssa_timestamp, SSA_trajs[j,zz,k],'--', self.colors[k%len(self.colors)])
-                plt.title("SSA")
-                plt.savefig("myplots/SSA_trajs_{}.png".format(j))
+                plt.title("stochastic")
+                plt.legend(fontsize=14)
+                plt.xlabel("time")
+                plt.ylabel("nb. bikes")
+                plt.tight_layout()
+                plt.savefig("myplots/{}_SSA_trajs_{}stations_H={}.png".format(j, self.n_stations, final_time))
                 plt.close()            
 
         self.SSA_trajs = SSA_trajs

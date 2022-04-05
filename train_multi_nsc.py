@@ -67,6 +67,7 @@ class Train_MultiNSC():
 
 		losses = []
 		accuracies = []
+		peroutput_accuracies = []
 		
 		bat_per_epo = int(self.dataset.n_training_points / batch_size)
 		n_steps = bat_per_epo * n_epochs
@@ -74,6 +75,7 @@ class Train_MultiNSC():
 		for epoch in range(n_epochs):
 			
 			tmp_acc = []
+			temp_perout_acc = []
 			tmp_loss = []
 			for i in range(bat_per_epo):
 				
@@ -98,8 +100,9 @@ class Train_MultiNSC():
 				optimizer.step()
 				
 				# Print some performance to monitor the training
-				glob_acc, _ = self.compute_accuracy(Lt, hypothesis)
+				glob_acc, perout_acc = self.compute_accuracy(Lt, hypothesis)
 				tmp_acc.append(glob_acc)
+				temp_perout_acc.append(perout_acc)
 				tmp_loss.append(loss.item())   
 			
 			if epoch % 50 == 0:
@@ -107,17 +110,22 @@ class Train_MultiNSC():
 				
 			losses.append(np.mean(tmp_loss))
 			accuracies.append(np.mean(tmp_acc))
+			peroutput_accuracies.append(np.mean(temp_perout_acc,axis=0))
 
+		peroutput_accuracies = np.array(peroutput_accuracies)
 		fig_loss = plt.figure()
-		plt.plot(np.arange(n_epochs), losses, label="train")
+		plt.plot(np.arange(n_epochs), losses)
 		plt.tight_layout()
 		plt.title("loss")
 		fig_loss.savefig(self.results_path+"/loss_{}epochs.png".format(self.n_epochs))
 		plt.close()
 
 		fig_acc = plt.figure()
-		plt.plot(np.arange(n_epochs), accuracies, label="train")
+		plt.plot(np.arange(n_epochs), accuracies, label="global")
+		for i in range(self.dataset.n_outputs):
+			plt.plot(np.arange(n_epochs), peroutput_accuracies[:,i], label="S{}".format(i))
 		plt.tight_layout()
+		plt.legend()
 		plt.title("accuracy")
 		fig_acc.savefig(self.results_path+"/accuracy_{}epochs.png".format(self.n_epochs))
 		plt.close()

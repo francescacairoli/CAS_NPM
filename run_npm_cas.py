@@ -10,7 +10,8 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--arch_name", type=str, default="triangular", help="Name of the architecture.")
-parser.add_argument("--model_name", type=str, default="SSA", help="Name of the model (first letters code).")
+parser.add_argument("--model_name", type=str, default="MF", help="Name of the model (first letters code).")
+parser.add_argument("--time_horizon", type=int, default=10, help="Time horizon")
 parser.add_argument("--do_refinement", type=bool, default=True, help="Flag: refine of the rejection rule.")
 parser.add_argument("--nb_active_iteratiions", type=int, default=1, help="Number of active learning iterations.")
 parser.add_argument("--nb_epochs", type=int, default=100, help="Number of epochs.")
@@ -26,21 +27,17 @@ parser.add_argument("--reinit_weights", type=bool, default=False, help="Flag: do
 opt = parser.parse_args()
 print(opt)
 
-if opt.arch_name == "triangular":
-	n_bikes = 30
-elif opt.arch_name == "rombo":
-	n_bikes = 50
-else:
-	n_bikes = 30
+n_bikes = 100
+capacity = 35
 
 # Load the proper datasets: train, test, validation and calibration
-trainset_fn = "datasets/{}_ds_5000points_{}bikes_12capacity_{}.pickle".format(opt.arch_name, n_bikes, opt.model_name)
-testset_fn = "datasets/{}_ds_1000points_{}bikes_12capacity_{}.pickle".format(opt.arch_name, n_bikes, opt.model_name)
-calibrset_fn = "datasets/{}_ds_1000points_{}bikes_12capacity_{}.pickle".format(opt.arch_name, n_bikes, opt.model_name)
+trainset_fn = "datasets/{}_ds_1000points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
+testset_fn = "datasets/{}_ds_1000points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
+calibrset_fn = "datasets/{}_ds_2500points_{}bikes_{}capacity_H={}_{}.pickle".format(opt.arch_name, n_bikes, capacity, opt.time_horizon, opt.model_name)
 
 dataset = Dataset(trainset_fn, testset_fn)
 dataset.load_data()
-
+'''
 dataset.add_calibration_path(calibrset_fn)
 dataset.load_calibration_data()
 
@@ -66,6 +63,7 @@ print("Test empirical coverage: ", coverage, "Efficiency: ", efficiency)
 
 print("----- Labeling correct/incorrect predictions...")
 cal_errors = utils.label_correct_incorrect_pred(cp.cal_pred_lkh, dataset.L_cal) # shape (n_cal_points,n_outputs)
+print("CALIBRATION ERRORS: ", cal_errors, np.sum(cal_errors[(cal_errors==1)]))
 test_pred_lkh = net_fnc(dataset.X_test_scaled)
 test_errors = utils.label_correct_incorrect_pred(test_pred_lkh, dataset.L_test) # shape (n_test_points,n_outputs)
 
